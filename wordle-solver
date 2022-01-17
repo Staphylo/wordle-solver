@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+
+"""
+Attempts in the form of [<word> <result>]...
+
+The command will read the current state of the board via the cli
+Positional arguments are provided by pairs.
+The first item is the word attempted, the second item is the result.
+
+The result is a list of words that could be provided for the next move.
+The output can be limited and sorted (crappy algo based on letter frequency)
+A dict needs to be provided.
+
+examples:
+$0 irate xx..o
+$0 -l 10 -s irate xx..o spire o.oooo
+"""
+
+import argparse
+import sys
+
+CHAR_BLACKLIST = '.'
+CHAR_INCORRECT = 'x'
+CHAR_CORRECT = 'o'
+
+class Attempt(object):
+    def __init__(self, word, res):
+        self.word = word
+        self.result = res
+
+    def blacklist(self):
+        return [c for c, s in zip(self.word, self.result) if s == CHAR_BLACKLIST]
+
+    def incorrect(self):
+        return [(i, c) for i, (c, s) in enumerate(zip(self.word, self.result)) if s == CHAR_INCORRECT]
+
+    def match(self):
+        return [(i, c) for i, (c, s) in enumerate(zip(self.word, self.result)) if s == CHAR_CORRECT]
+
+class Letter(object):
+    def __init__(self, letter, frequency):
+        self.letter = letter
+        self.frequency = frequency
+        self.blacklist = False
+        self.position = []
+        self.incorrect = []
+
+class Solver(object):
+    ALPHABET = [
+        Letter('a', 8.4966),
+        Letter('b', 2.0720),
+        Letter('c', 4.5388),
+        Letter('d', 3.3844),
+        Letter('e', 11.1607),
+        Letter('f', 1.8121),
+        Letter('g', 2.4705),
+        Letter('h', 3.0034),
+        Letter('i', 7.5448),
+        Letter('j', 0.1965),
+        Letter('k', 1.1016),
+        Letter('l', 5.4893),
+        Letter('m', 3.0129),
+        Letter('n', 6.6544),
+        Letter('o', 7.1635),
+        Letter('p', 3.1671),
+        Letter('q', 0.1962),
+        Letter('r', 7.5809),
+        Letter('s', 5.7351),
+        Letter('t', 6.9509),
+        Letter('u', 3.6308),
+        Letter('v', 1.0074),
+        Letter('w', 1.2899),
+        Letter('x', 0.2902),
+        Letter('y', 1.7779),
+        Letter('z', 0.2722),
+    ]
+    def __init__(self, attempts, wmin, wmax):
+        self.attempts = attempts
+        self.alphabet = {l.letter: l for l in self.ALPHABET}
+        self.wmin = wmin
+        self.wmax = wmax
+
+    def processAttempts(self):
+        for attempt in self.attempts:
+            for char in attempt.blacklist():
+                self.alphabet[char].blacklist = True
+            for pos, char in attempt.match():
+                letter = self.alphabet[char]
+                assert not letter.blacklist
+                if pos not in letter.position:
+                    letter.position.append(pos)
+            for pos, char in attempt.incorrect():
+                letter = self.alphabet[char]
+                assert not letter.blacklist
+                if pos not in letter.incorrect:
+                    letter.incorrect.append(pos)
+
+    def printAlphabet(self):
+        for letter in sorted(self.alphabet):
+            letter = self.alphabet[letter]
+            print('%s: %s %s %s' % (letter.letter, letter.blacklist,
+                                    letter.position, letter.incorrect))
+
+    def sortBestWords(self, words):
+        results = {}
+        for word in words:
+            score = 0.
+            seen = set()
+            for c in word:
+                if c in seen:
+                    continue
+                score += self.alphabet[c].frequency
+                seen.add(c)
+            results[score] = word
+        return [results[s] for s in sorted(results, reverse=True)]
+
+    def otherLetterInPos(self, pos, c):
+        for l in self.alphabet.values():
+            if pos in l.position and l.letter != c:
+                return True
+        return False
+
+    def mandatory(self):
+        res = []
+        for l in self.alphabet.values():
+            if l.position:
+                res.append(l.letter)
+            elif l.incorrect:
+                res.append(l.letter)
+        return res
+
+    def testWord(self, word):
+        if len(word) < self.wmin or len(word) > self.wmax:
+            return None
+        mandatory = self.mandatory()
+        for pos, c in enumerate(word):
+            letter = self.alphabet.get(c)
+            if letter is None:
+                return None
+            if letter.blacklist:
+                return None
+            if pos in letter.incorrect:
+                return None
+            if self.otherLetterInPos(pos, c):
+                return None
+            if c in mandatory:
+                mandatory.remove(c)
+        if mandatory:
+            return None
+        return word
+
+    def processDictionary(self, path):
+        words = []
+        with open(path) as f:
+            for line in f.readlines():
+                word = self.testWord(line.rstrip())
+                if word is not None:
+                    words.append(word)
+        return words
+
+    def displayWords(self, words, limit=None):
+        for cnt, word in enumerate(words):
+            print(word)
+            if limit is not None and cnt > limit:
+                break
+
+    def solve(self, dictionary, sort, limit):
+        self.processAttempts()
+        self.printAlphabet()
+        words = self.processDictionary(dictionary)
+        if sort:
+           words = self.sortBestWords(words)
+        self.displayWords(words, limit=limit)
+
+def parseArgs(args):
+    parser = argparse.ArgumentParser(
+        prog='wordle-solver',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__,
+    )
+    parser.add_argument('-m', '--min', default=5, type=int)
+    parser.add_argument('-M', '--max', default=5, type=int)
+    parser.add_argument('-l', '--limit', default=None, type=int)
+    parser.add_argument('-s', '--sort', action='store_true')
+    parser.add_argument('-d', '--dictionary', default='all.txt')
+    parser.add_argument('attempts', nargs='*')
+    return parser.parse_args()
+
+def main(args):
+    args = parseArgs(args)
+
+    attempts = []
+    for i in range(0, len(args.attempts), 2):
+        attempt = Attempt(args.attempts[i], args.attempts[i+1])
+        attempts.append(attempt)
+
+    solver = Solver(attempts, args.min, args.max)
+    solver.solve(args.dictionary, args.sort, args.limit)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
