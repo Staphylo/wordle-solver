@@ -111,8 +111,8 @@ class Solver(object):
                     continue
                 score += self.alphabet[c].frequency
                 seen.add(c)
-            results[score] = word
-        return [results[s] for s in sorted(results, reverse=True)]
+            results[word] = score
+        return [k for k, _ in sorted(results.items(), reverse=True, key=lambda x: x[1])]
 
     def otherLetterInPos(self, pos, c):
         for l in self.alphabet.values():
